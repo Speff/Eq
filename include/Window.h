@@ -1,5 +1,6 @@
 #define SAMPLE_RATE (44100)
-#define NLINES (100)
+#define AUDIO_FPB   (256)
+#define NLINES      (128)
 
 #include <stdio.h>
 #include <math.h>
@@ -15,9 +16,23 @@ typedef struct{
 } paTestData;
 
 typedef struct{
-    float x;
-    float y;
+    float *x;
+    float *y;
 } coord;
+
+typedef struct{
+    GLfloat startX;
+    GLfloat startY;
+    GLfloat sizeX;
+    GLfloat sizeY;
+    GLuint nVerts;
+    GLuint nElements;
+    GLuint nLines;
+    size_t size;
+    coord *vertStart;
+    coord *vertEnd;
+    GLfloat *lineMag;
+} eqFFTProps;
 
 static int paTestCallback(
 		const void *,
@@ -28,9 +43,11 @@ static int paTestCallback(
 		void *);
 
 static void initGLBoilerplate(int, int, GLuint*);
-static void initAudio(PaStream *, paTestData *);
-GLfloat* initLineVerts(GLuint, size_t, GLfloat, GLfloat, GLfloat, GLfloat);
-static void destroyAudio(PaStream *);
+static void initAudio(PaStream*, paTestData*);
+//GLfloat* initLineVerts(GLuint, size_t, GLfloat, GLfloat, GLfloat, GLfloat);
+GLfloat* initLineVerts(eqFFTProps*);
+void updateVerts(eqFFTProps*);
+static void destroyAudio(PaStream*);
 
 static void key_pressed(GLFWwindow*, int, int, int, int);
 static void window_resized(GLFWwindow*, int, int);

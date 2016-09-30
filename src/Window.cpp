@@ -5,12 +5,11 @@ int screen_height = 200;
 
 int main(){
 	GLFWwindow* window;
+    eqFFTProps props;
 
     GLuint VAO, VBO;
     GLuint program;
     GLfloat *lineCoords;
-    GLuint lineCoords_nVerts = NLINES * 2; // 1 Line = 2 Verts = 4 floats (x, y)
-    size_t lineCoords_size = sizeof(GLfloat) * 2 * lineCoords_nVerts;
 
 	PaStream *audioStream = NULL;
 	paTestData data;
@@ -61,13 +60,18 @@ int main(){
 	initAudio(audioStream, &data);
 
     
-    lineCoords = initLineVerts(
-            lineCoords_nVerts,
-            lineCoords_size,
-            screen_width/10,
-            screen_height/10,
-            screen_width * 8/10,
-            screen_height * 8/10);
+    lineCoords = initLineVerts(&props);
+            //lineCoords_nVerts,
+            //lineCoords_size,
+            //screen_width/10,
+            //screen_height/10,
+            //screen_width * 8/10,
+            //screen_height * 8/10);
+
+    for(unsigned int i = 0; i < props.nLines; i++) props.lineMag[i] = 0.05;
+    updateVerts(&props);
+    printf("%f, %f\n%f, %f\n", lineCoords[4], lineCoords[5], lineCoords[6],
+            lineCoords[7]);
 
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
@@ -75,9 +79,9 @@ int main(){
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
     glBufferData(
             GL_ARRAY_BUFFER,
-            lineCoords_size,
+            props.size,
             lineCoords,
-            GL_DYNAMIC_DRAW);
+            GL_STREAM_DRAW);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(GL_FLOAT), 0);
 
@@ -85,19 +89,31 @@ int main(){
     glBindVertexArray(0);
 
     glPrintError(glGetError());
-    printf("%f, %f\n%f, %f\n", lineCoords[4], lineCoords[5], lineCoords[6],
-            lineCoords[7]);
 
 	printf("Hello World\n");
+    unsigned int pos = 0;
 	while(!glfwWindowShouldClose(window)){
         // Render here
-        glClearColor(0.05f, 0.05f, 0.05f, 0.0f);
+        glClearColor(0.05f, 0.05f, 0.05f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         glfwGetFramebufferSize(window, &screen_width, &screen_height);
         glViewport(0, 0, screen_width, screen_height);
 
+        pos++;
+        if(pos == props.nLines) pos = 0;
+        props.lineMag[pos] = data.left_phase;
+        updateVerts(&props);
+
         glBindVertexArray(VAO);
-        glDrawArrays(GL_LINES, 0, 2*lineCoords_nVerts);
+        glBindBuffer(GL_ARRAY_BUFFER, VBO);
+        glBufferData(
+                GL_ARRAY_BUFFER,
+                props.size,
+                lineCoords,
+                GL_STREAM_DRAW);
+        glDrawArrays(GL_LINES, 0, props.nElements);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindVertexArray(0);
 
 		// Swap frame buffers
 		glfwSwapBuffers(window);
@@ -105,14 +121,13 @@ int main(){
 		// Poll for events
 		glfwPollEvents();
 		
-		for(int i = 0; i < (int)floor(100*data.left_phase) + 30; i++)
-			printf(" ");
-		printf("\rLeft: ");
-		for(int i = 0; i < (int)floor(100*data.left_phase); i++){
-			printf("*");
-		}
-		printf("\r");
-		Sleep(16);
+		//for(int i = 0; i < (int)floor(100*data.left_phase) + 30; i++)
+		//	printf(" ");
+		//printf("\rLeft: ");
+		//for(int i = 0; i < (int)floor(100*data.left_phase); i++){
+		//	printf("*");
+		//}
+		//printf("\r");
 	}
 
     free(lineCoords);
@@ -163,11 +178,11 @@ static void initAudio(PaStream *audioStream, paTestData *data){
 			0,              // Number of output channels
 			paFloat32,      // 32-bit floating point output
 			SAMPLE_RATE,
-			256,            // frames per buffer, ie. the number
+			AUDIO_FPB,      // frames per buffer, ie. the number
 			                // of sample frames PA will request
 			                // from callback function
 			paTestCallback, // cb function
-			data);         // Pointer passed to cb
+			data);          // Pointer passed to cb
 	if(paErr != paNoError)
 		printf("PortAudio error: %s\n", Pa_GetErrorText(paErr));
 
@@ -188,22 +203,49 @@ static void destroyAudio(PaStream *audioStream){
 		printf("PortAudio error: %s\n", Pa_GetErrorText(paErr));
 }
 
-GLfloat* initLineVerts(GLuint nVerts, size_t lSize, GLfloat startX,
-        GLfloat startY, GLfloat drawSizeX, GLfloat drawSizeY){
+GLfloat* initLineVerts(eqFFTProps *props){
+    props->nVerts = NLINES * 2; // 1 Line = 2 Verts = 4 floats (x, y)
+    props->nElements = props->nVerts * 2;
+    props->nLines = NLINES;
+    props->size = sizeof(GLfloat) * 2 * props->nVerts;
+    props->sizeX = screen_width * 8/10;
+    props->sizeY = screen_height * 8/10;
+    props->startX = screen_width/10;
+    props->startY = screen_height/10;
 
-    GLfloat *lineCoords = (GLfloat*)malloc(sizeof(GLfloat) * nVerts * 2);
+    GLfloat *lineCoords = (GLfloat*)malloc(sizeof(GLfloat) * props->nElements);
+    props->vertStart = (coord*)malloc(sizeof(coord) * props->nLines);
+    props->vertEnd = (coord*)malloc(sizeof(coord) * props->nLines);
+    props->lineMag = (GLfloat*)malloc(sizeof(GLfloat) * props->nLines);
 
-    for(unsigned int i = 0; i < nVerts/2; i++){
-        lineCoords[4*i] = startX + i*(drawSizeX/nVerts*2.0);
-        lineCoords[4*i + 1] = startY;
-        lineCoords[4*i + 2] = startX + i*(drawSizeX/nVerts*2.0);
-        lineCoords[4*i + 3] = startY + drawSizeY/2.0;
+    for(unsigned int i = 0; i < props->nLines; i++){
+        lineCoords[4*i] = props->startX +
+            i*((props->sizeX)/(props->nVerts)*2.0);
+        lineCoords[4*i + 1] = props->startY;
+        lineCoords[4*i + 2] = props->startX + 
+            i*((props->sizeX)/(props->nVerts)*2.0);
+        lineCoords[4*i + 3] = props->startY + (props->sizeY)/2.0;
+
+        props->vertStart[i].x = &lineCoords[4*i];
+        props->vertStart[i].y = &lineCoords[4*i + 1];
+        props->vertEnd[i].x = &lineCoords[4*i + 2];
+        props->vertEnd[i].y = &lineCoords[4*i + 3];
+        props->lineMag[i] = 0.5;
     }
 
     return lineCoords;
 }
 
+void updateVerts(eqFFTProps *props){
+    //printf("vertEnd[0]: %f, %f\n", *(props->vertEnd[0].x), *(props->vertEnd[0].y));
+    for(unsigned int i = 0; i < props->nLines; i++){
+        *(props->vertEnd[i].x) = *(props->vertStart[i].x);
+        *(props->vertEnd[i].y) = *(props->vertStart[i].y) +
+            (props->lineMag[i] * props->sizeY);
+    }
 
+    //printf("vertEnd[0]: %f, %f\n", *(props->vertEnd[0].x), *(props->vertEnd[0].y));
+}
 
 void initGLBoilerplate(int screenWidth, int screenHeight, GLuint *program){
     // Compile the shaders
